@@ -1,0 +1,45 @@
+- name: Gather facts and filter yum packages
+  hosts: "{{ target }}"
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Gather information about available yum packages
+      yum:
+        list: available
+      register: yum_available
+
+    - name: Gather information about installed yum packages
+      yum:
+        list: installed
+      register: yum_installed
+
+    - name: Filter installed packages
+      set_fact:
+        filtered_installed_packages: "{{ yum_installed.results | map(attribute='name') | map('regex_replace', '^(.*)$', 'pcp-pmda-\\1') | list | unique }}"
+
+    - name: Filter available packages containing 'pcp-pmda-'
+      set_fact:
+        filtered_available_packages: "{{ yum_available.results | selectattr('name', 'search', 'pcp-pmda-') | map(attribute='name') | list | unique }}"
+
+    - name: Find available packages for pcp
+      set_fact:
+        common_substrings: "{{ filtered_available_packages | intersect(filtered_installed_packages) }}"
+
+    - name: Display common substrings as stdout_lines
+      debug:
+        var: common_substrings
+      when: common_substrings | length > 0
+
+    - name: Pause for user input
+      pause:
+        prompt: "Введите названия приложений для установки, разделенные запятой (,)"
+      register: user_input
+      timeout: 30
+      when: common_substrings | length > 0
+      ignore_errors: yes
+
+    - name: Install selected applications
+      yum:
+        name: "{{ user_input.user_input.split(',') }}"
+        state: present
+      when: user_input.user_input is defined

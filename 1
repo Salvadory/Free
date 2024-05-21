@@ -38,8 +38,41 @@
       when: common_substrings | length > 0
       ignore_errors: yes
 
-    - name: Install selected applications
+    - name: Install selected pmda packages
       yum:
         name: "{{ user_input.user_input.split(',') }}"
         state: present
       when: user_input.user_input is defined
+
+    - name: Prepare string packages to agent
+      set_fact:
+        pmda_agent: >-
+          {{
+            user_input.user_input.split(',')
+            | map('trim')
+            | map('regex_replace', '^pcp-pmda-', '')
+            | join(',')
+          }}
+
+    - name: Print the modified string
+      debug:
+        msg: "NeedInstall agent:  {{ pmda_agent }}"
+
+    - name: Extract metric collection configuration file content
+      command: "cat /etc/pcp/pmcd/pmcd.conf"
+      register: pmcd_conf
+      changed_when: false
+
+    - name: Ensure optional metric collection agents are enabled
+      file:
+        path: "/var/lib/pcp/pmdas/{{ item }}/.NeedInstall"
+        mode: u=rw,g=r,o=r
+        state: touch
+      loop: "{{ pmda_agent.split(',') | default([]) }}"
+      when: pmcd_conf.stdout.find(item) == -1
+
+    - name: Ensure performance metric collector is restarted and enabled on boot
+      service:
+        name: pmcd
+        state: restarted
+        enabled: true

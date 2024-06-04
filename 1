@@ -1,81 +1,93 @@
-- name: Gather facts and filter yum packages
-  hosts: "{{ target }}"
-  become: yes
-  gather_facts: yes
-  tasks:
-    - name: Gather information about available yum packages
-      yum:
-        list: available
-      register: yum_available
+#!/bin/bash
 
-    - name: Gather information about installed yum packages
-      yum:
-        list: installed
-      register: yum_installed
+# Функция для рекурсивного экспорта секретов с версиями
+export_secrets() {
+    local path="$1"
+    local base_path="$2"
 
-    - name: Filter installed packages
-      set_fact:
-        filtered_installed_packages: "{{ yum_installed.results | map(attribute='name') | map('regex_replace', '^(.*)$', 'pcp-pmda-\\1') | list | unique }}"
+    # Получаем список всех ключей и директорий в текущем пути
+    local keys=$(vault kv list -format=json "$path" | jq -r '.[]')
 
-    - name: Filter available packages containing 'pcp-pmda-'
-      set_fact:
-        filtered_available_packages: "{{ yum_available.results | selectattr('name', 'search', 'pcp-pmda-') | map(attribute='name') | list | unique }}"
+    for key in $keys; do
+        if [[ "$key" == */ ]]; then
+            # Если это директория, создаем соответствующую директорию и рекурсивно экспортируем её содержимое
+            mkdir -p "$base_path/$key"
+            export_secrets "$path/$key" "$base_path/$key"
+        else
+            # Если это секрет, экспортируем его версии в файлы
+            local secret_path="$path/$key"
+            local output_dir="$base_path/$key"
+            mkdir -p "$output_dir"
 
-    - name: Find available packages for pcp
-      set_fact:
-        common_substrings: "{{ filtered_available_packages | intersect(filtered_installed_packages) }}"
+            local versions=$(vault kv metadata get -format=json "$secret_path" | jq '.data.versions|keys|join("\n")' -r)
 
-    - name: Display common substrings as stdout_lines
-      debug:
-        var: common_substrings
-      when: common_substrings | length > 0
+            for version in $versions; do
+                local output_file="$output_dir/version_$version.json"
+                vault kv get -version="$version" -format=json -field=data "$secret_path" > "$output_file"
+                echo "Секрет $secret_path версии $version экспортирован в $output_file"
+            done
+        fi
+    done
+}
 
-    - name: Pause for user input
-      pause:
-        prompt: "Введите названия приложений для установки, разделенные запятой (,)"
-      register: user_input
-      timeout: 30
-      when: common_substrings | length > 0
-      ignore_errors: yes
-       
-    - name: Install selected pmda packages
-      yum:
-        name: "{{ user_input.user_input.split(',') }}"
-        state: present
-      when: user_input.user_input is defined and user_input.user_input | length > 0
+# Указание корневого пути в Vault
+ROOT_PATH="kv1/"
+# Указание корневого пути для экспорта
+EXPORT_DIR="/scr1/Export/"
 
-    - name: Prepare string packages to agent
-      set_fact:
-        pmda_agent: >-
-          {{
-            user_input.user_input.split(',')
-            | map('trim')
-            | map('regex_replace', '^pcp-pmda-', '')
-            | join(',')
-          }}
-      when: user_input.user_input is defined and user_input.user_input | length > 0
+# Создаем корневую директорию для экспорта
+mkdir -p "$EXPORT_DIR"
 
-    - name: Print the modified string
-      debug:
-        msg: "NeedInstall agent:  {{ pmda_agent }}"
-      when: user_input.user_input is defined and user_input.user_input | length > 0
+# Запуск функции для корневого пути
+export_secrets "$ROOT_PATH" "$EXPORT_DIR"
 
-    - name: Extract metric collection configuration file content
-      command: "cat /etc/pcp/pmcd/pmcd.conf"
-      register: pmcd_conf
-      changed_when: false
-      when: user_input.user_input is defined and user_input.user_input | length > 0
 
-    - name: Ensure optional metric collection agents are enabled
-      file:
-        path: "/var/lib/pcp/pmdas/{{ item }}/.NeedInstall"
-        mode: u=rw,g=r,o=r
-        state: touch
-      loop: "{{ pmda_agent.split(',') | default([]) }}"
-      when: user_input.user_input is defined and user_input.user_input | length > 0 and pmda_agent is defined and pmcd_conf.stdout.find(item) == -1
+#!/bin/bash
 
-    - name: Ensure performance metric collector is restarted and enabled on boot
-      service:
-        name: pmcd
-        state: restarted
-        enabled: true
+# Функция для рекурсивного импорта секретов с версиями
+import_secrets() {
+    local path="$1"
+    local base_path="$2"
+    
+    echo "Обработка директории: $path"
+
+    # Рекурсивно обходим все файлы и директории в текущем пути
+    for entry in "$path"/*; do
+        if [[ -d "$entry" ]]; then
+            echo "Найдена директория: $entry"
+            # Если это директория, рекурсивно импортируем её содержимое
+            import_secrets "$entry" "$base_path"
+        elif [[ -f "$entry" && "$entry" == *version_*.json ]]; then
+            echo "Найден файл версии: $entry"
+            # Если это JSON-файл, импортируем его как секрет определенной версии
+            local relative_path="${entry#$base_path/}"
+            local secret_path="${relative_path%/version_*}"
+            local version="${relative_path#*version_}"
+            version="${version%.json}"
+            local secret_data=$(jq . "$entry")
+
+            echo "Импортируем секрет из файла $entry в путь $ROOT_PATH/$secret_path с версией $version"
+            echo "Данные секрета: $secret_data"
+
+            tmp_file=$(mktemp)
+            echo "$secret_data" > "$tmp_file"
+            
+            vault kv put "$ROOT_PATH$secret_path" @$tmp_file
+            if [[ $? -eq 0 ]]; then
+                echo "Секрет из $entry версии $version успешно импортирован в Vault по пути $ROOT_PATH/$secret_path"
+            else
+                echo "Ошибка при импорте секрета из $entry версии $version в Vault по пути $ROOT_PATH/$secret_path" >&2
+            fi
+
+            rm "$tmp_file"
+        else
+            echo "Пропущен элемент: $entry"
+        fi
+    done
+}
+
+# Указание корневого пути для импорта
+IMPORT_DIR="/scr1/Export/"
+ROOT_PATH="kv3/"
+# Запуск функции для корневого пути
+import_secrets "$IMPORT_DIR" "$IMPORT_DIR"

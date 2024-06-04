@@ -1,0 +1,30 @@
+pipeline {
+    agent any
+         environment {
+            dst_server = "Webserver"
+            file_name = "*"
+            branch_name = "dev"
+        }
+    stages {
+        stage('GIT'){
+            steps {
+                git branch: "${branch_name}", credentialsId: 'GitHub_SSH_key', url: 'git@github.com:Salvadory/MyDefaultWebPage.git'
+                sh 'pwd'
+                sh 'ls -la'
+            }
+        }
+        stage('Build') {
+            steps {
+                sh "nginx -g 'daemon off;'"
+            }
+            agent {
+                dockerfile {
+                    additionalBuildArgs  '--tag test'
+                    args "-u root -v /var/lib/jenkins/workspace/01_Pipeline_from_github_to_TEST_docker_webserver_overssh:/usr/share/nginx/html:ro -p 80:80"
+                }
+            }
+            
+            
+        }
+    }
+}

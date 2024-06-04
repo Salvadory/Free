@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+    environment {
+        dst_server = "WEB_server1"
+        file_name = "index.html"
+    }
+    // 
+    stages {
+        stage('git') {
+            steps {
+                git branch: 'main', credentialsId: 'GitHub_SSH_key', url: 'git@github.com:Salvadory/WebSite.git'
+                sh 'pwd'
+            }
+        }
+       
+     // sshPublisher(publishers: [sshPublisherDesc(configName: 'SERVER_to_be_deployed', transfers: [sshTransfer(excludes: '', execCommand: '', execTimeout: 120000, flatten: false, makeEmptyDirs: false, noDefaultExcludes: false, patternSeparator: '[, ]+', remoteDirectory: '', remoteDirectorySDF: false, removePrefix: '', sourceFiles: '**/target/*.war')], usePromotionTimestamp: false, useWorkspaceInPromotion: false, verbose: false)])
+           
+        stage('Transfer_ssh') {
+            steps {
+                sshPublisher(
+                    failOnError: false,
+                    publishers: [
+                       sshPublisherDesc(
+                          configName: "${dst_server}",
+                          transfers: [
+                            sshTransfer(
+                              excludes: '',
+                              execCommand: '',
+                              execTimeout: 120000,
+                              flatten: false,
+                              makeEmptyDirs: false,
+                              noDefaultExcludes: false,
+                              patternSeparator: '[, ]+',
+                              remoteDirectory: '',
+                              remoteDirectorySDF: false,
+                              removePrefix: '',
+                              sourceFiles: "${file_name}")],
+                              usePromotionTimestamp: false,
+                              useWorkspaceInPromotion: false,
+                              verbose: false
+                           )
+                         ]
+                      )
+                  } 
+               }
+        
+        stage('Build') {
+            steps {
+                echo 'Building'
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                echo 'Testing'
+            }
+        }
+    
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying'
+            }
+        }
+    }
+}

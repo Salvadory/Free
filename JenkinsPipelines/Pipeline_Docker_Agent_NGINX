@@ -1,0 +1,23 @@
+pipeline {
+    agent any
+    stages {
+        stage('Server') {
+            agent {
+                docker { 
+                    image "nginx:latest" 
+                    args "-u root -v ${WORKSPACE}:/usr/share/nginx/html:ro -d -p 80:80"
+                    reuseNode true
+                } 
+                        
+                    }
+                steps {
+                        echo 'Building'
+                        sh 'pwd'
+                        sh 'ls -la'
+                        sh "nginx -v"  
+                        sh 'dir /usr/share/nginx/html'
+                        sh "nginx -g 'daemon off;'"
+                    }
+            }
+        }
+    }

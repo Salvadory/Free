@@ -1,0 +1,70 @@
+
+pipeline {
+  agent any
+   environment {
+        dst_server = "Webserver"
+        file_name = "*"
+        branch_name = "master"
+    }
+    // 
+  stages {
+    stage('git') {
+            steps {
+                git branch: "${branch_name}", credentialsId: 'GitHub_SSH_key', url: 'git@github.com:Salvadory/MyDefaultWebPage.git'
+                sh 'pwd'
+                sh 'ls -la'
+            }
+        }  
+    stage('Transfer_ssh') {
+            steps {
+                sshPublisher(
+                    failOnError: true,
+                    publishers: [
+                       sshPublisherDesc(
+                          configName: "${dst_server}",
+                          transfers: [
+                            sshTransfer(
+                              excludes: '',
+                              execTimeout: 120000,
+                              execCommand: 'sudo service nginx restart', 
+                              flatten: false,
+                              makeEmptyDirs: false,
+                              noDefaultExcludes: false,
+                              patternSeparator: '[, ]+',
+                              remoteDirectory: '',
+                              remoteDirectorySDF: false,
+                              removePrefix: '',
+                              sourceFiles: "${file_name}")],
+                              usePromotionTimestamp: false,
+                              useWorkspaceInPromotion: false,
+                              verbose: false
+                              
+                           )
+                         ]
+                      )
+                  } 
+               }
+        
+   
+        
+        stage('Build') {
+            steps {
+                echo 'Building'
+                
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                echo 'Testing'
+            }
+        }
+    
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying'
+            }
+        }
+    }
+}

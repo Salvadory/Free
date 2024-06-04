@@ -1,4 +1,0 @@
-# Put internal variables here with RedOS
-
-__pcp_pmcd_defaults_path: /etc/sysconfig/pmcd
-__pcp_pmproxy_defaults_path: /etc/sysconfig/pmproxy

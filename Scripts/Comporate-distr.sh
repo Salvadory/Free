@@ -1,98 +1,53 @@
 #!/bin/bash
 
-# Проверка наличия двух аргументов
+# Проверяем наличие двух аргументов (папок)
 if [ "$#" -ne 2 ]; then
-  echo "Usage: $0 <directory1> <directory2>"
-  exit 1
+    echo "Usage: $0 <folder1> <folder2>"
+    exit 1
 fi
 
-DIR1=$1
-DIR2=$2
+FOLDER1=$1
+FOLDER2=$2
 
-# Проверка существования папок
-if [ ! -d "$DIR1" ]; then
-  echo "Directory $DIR1 does not exist."
-  exit 1
+# Проверяем, существуют ли указанные папки
+if [ ! -d "$FOLDER1" ]; then
+    echo "Folder $FOLDER1 does not exist."
+    exit 1
 fi
 
-if [ ! -d "$DIR2" ]; then
-  echo "Directory $DIR2 does not exist."
-  exit 1
+if [ ! -d "$FOLDER2" ]; then
+    echo "Folder $FOLDER2 does not exist."
+    exit 1
 fi
 
-# Функция для рекурсивного сравнения директорий по именам и содержимому
-compare_dirs() {
-  local dir1=$1
-  local dir2=$2
-
-  # Получаем список файлов и директорий в первой папке
-  local entries1=$(find "$dir1" -type f -printf '%P\n' | sort)
-
-  # Получаем список файлов и директорий во второй папке
-  local entries2=$(find "$dir2" -type f -printf '%P\n' | sort)
-
-  # Проходим по элементам из первой папки
-  for entry in $entries1; do
-    if [ ! -e "$dir2/$entry" ]; then
-      echo "$dir2/$entry does not exist."
-    fi
-  done
-
-  # Проходим по элементам из второй папки
-  for entry in $entries2; do
-    if [ ! -e "$dir1/$entry" ]; then
-      echo "$dir1/$entry does not exist."
-    fi
-  done
-
-  # Сравниваем файлы с одинаковыми путями
-  for entry in $entries1; do
-    if [ -e "$dir2/$entry" ]; then
-      if [ -f "$dir1/$entry" ] && [ -f "$dir2/$entry" ]; then
-        if ! cmp -s "$dir1/$entry" "$dir2/$entry"; then
-          echo "Files $dir1/$entry and $dir2/$entry differ:"
-          diff "$dir1/$entry" "$dir2/$entry"
-        fi
-      fi
-    fi
-  done
-}
-
-# Функция для сравнения содержимого файлов вне зависимости от имен
-compare_content() {
-  local dir1=$1
-  local dir2=$2
-
-  # Получаем список всех файлов в обеих папках
-  local files1=$(find "$dir1" -type f)
-  local files2=$(find "$dir2" -type f)
-
-  declare -A file_hash_map
-
-  # Вычисляем хэши файлов в первой папке и сохраняем их в ассоциативный массив
-  for file in $files1; do
-    hash=$(md5sum "$file" | awk '{print $1}')
-    file_hash_map["$hash"]="$file"
-  done
-
-  # Проверяем хэши файлов во второй папке
-  for file in $files2; do
-    hash=$(md5sum "$file" | awk '{print $1}')
-    if [[ -n "${file_hash_map["$hash"]}" ]]; then
-      unset file_hash_map["$hash"]
+# Функция для сравнения двух файлов
+compare_files() {
+    if cmp -s "$1" "$2"; then
+        echo "OK: $1 and $2 are identical"
     else
-      echo "File $file in $dir2 does not match any file in $dir1"
+        echo "DIFFERENT: $1 and $2 differ"
     fi
-  done
-
-  # Выводим файлы из первой папки, которые не совпали с файлами из второй папки
-  for hash in "${!file_hash_map[@]}"; do
-    echo "File ${file_hash_map["$hash"]} in $dir1 does not match any file in $dir2"
-  done
 }
 
-# Вызов функции сравнения директорий по именам и содержимому
-compare_dirs "$DIR1" "$DIR2"
+# Обходим файлы в первой папке
+for file1 in "$FOLDER1"/*; do
+    filename=$(basename "$file1")
+    file2="$FOLDER2/$filename"
 
-# Вызов функции сравнения содержимого файлов
-compare_content "$DIR1" "$DIR2"
+    if [ -e "$file2" ]; then
+        # Если файл существует во второй папке, сравниваем их
+        compare_files "$file1" "$file2"
+    else
+        echo "MISSING: $file1 has no corresponding file in $FOLDER2"
+    fi
+done
+
+# Обходим файлы во второй папке для поиска файлов, которых нет в первой папке
+for file2 in "$FOLDER2"/*; do
+    filename=$(basename "$file2")
+    file1="$FOLDER1/$filename"
+
+    if [ ! -e "$file1" ]; then
+        echo "MISSING: $file2 has no corresponding file in $FOLDER1"
+    fi
+done

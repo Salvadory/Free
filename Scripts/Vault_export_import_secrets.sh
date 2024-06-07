@@ -117,59 +117,64 @@ import_secrets() {
             echo "Найдена директория: $entry"
             # Если это директория, рекурсивно импортируем её содержимое
             import_secrets "$entry" "$base_path"
-        elif [[ -f "$entry" && "$entry" == *version_*.json ]]; then
-            echo "Найден файл версии: $entry"
-            # Если это JSON-файл, импортируем его как секрет определенной версии
-            local relative_path="${entry#$base_path/}"
-            local secret_path="${relative_path%/version_*}"
-            local version="${relative_path#*version_}"
-            version="${version%.json}"
-            local secret_data=$(jq . "$entry")
+        fi
+    done
 
-            # Проверка наличия версии секрета в Vault
-            if vault kv get -version="$version" "$ROOT_PATH$secret_path" > /dev/null 2>&1; then
-                echo "Секрет $secret_path версии $version уже существует, проверка данных..."
-                local existing_data=$(vault kv get -version="$version" -format=json "$ROOT_PATH$secret_path" | jq .data.data)
-                if [[ "$existing_data" == "$secret_data" ]]; then
-                    echo "Данные секрета $secret_path версии $version совпадают, пропуск..."
-                else
-                    echo "Данные секрета $secret_path версии $version отличаются, обновление..."
-                    tmp_file=$(mktemp)
-                    echo "$secret_data" > "$tmp_file"
-                    
-                    vault kv put "$ROOT_PATH$secret_path" @$tmp_file
-                    if [[ $? -eq 0 ]]; then
-                        echo "Секрет из $entry версии $version успешно обновлен в Vault по пути $ROOT_PATH$secret_path"
-                    else
-                        echo "Ошибка при обновлении секрета из $entry версии $version в Vault по пути $ROOT_PATH$secret_path" >&2
-                    fi
+    # Получаем список версий, сортируем их и импортируем в правильном порядке
+    for entry in $(ls "$path" | grep 'version_' | sort -V); do
+        local file_path="$path/$entry"
+        echo "Найден файл версии: $file_path"
+        # Если это JSON-файл, импортируем его как секрет определенной версии
+        local relative_path="${file_path#$base_path/}"
+        local secret_path="${relative_path%/version_*}"
+        local version="${relative_path#*version_}"
+        version="${version%.json}"
+        local secret_data=$(jq . "$file_path")
 
-                    rm "$tmp_file"
-                fi
+        # Проверка наличия версии секрета в Vault
+        if vault kv get -version="$version" "$ROOT_PATH$secret_path" > /dev/null 2>&1; then
+            echo "Секрет $secret_path версии $version уже существует, проверка данных..."
+            local existing_data=$(vault kv get -version="$version" -format=json "$ROOT_PATH$secret_path" | jq .data.data)
+            if [[ "$existing_data" == "$secret_data" ]]; then
+                echo "Данные секрета $secret_path версии $version совпадают, пропуск..."
             else
-                echo "Импортируем секрет из файла $entry в путь $ROOT_PATH$secret_path с версией $version"
+                echo "Данные секрета $secret_path версии $version отличаются, обновление..."
                 tmp_file=$(mktemp)
                 echo "$secret_data" > "$tmp_file"
                 
                 vault kv put "$ROOT_PATH$secret_path" @$tmp_file
                 if [[ $? -eq 0 ]]; then
-                    echo "Секрет из $entry версии $version успешно импортирован в Vault по пути $ROOT_PATH$secret_path"
+                    echo "Секрет из $file_path версии $version успешно обновлен в Vault по пути $ROOT_PATH$secret_path"
                 else
-                    echo "Ошибка при импорте секрета из $entry версии $version в Vault по пути $ROOT_PATH$secret_path" >&2
+                    echo "Ошибка при обновлении секрета из $file_path версии $version в Vault по пути $ROOT_PATH$secret_path" >&2
                 fi
 
                 rm "$tmp_file"
             fi
         else
-            echo "Пропущен элемент: $entry"
+            echo "Импортируем секрет из файла $file_path в путь $ROOT_PATH$secret_path с версией $version"
+            tmp_file=$(mktemp)
+            echo "$secret_data" > "$tmp_file"
+            
+            vault kv put "$ROOT_PATH$secret_path" @$tmp_file
+            if [[ $? -eq 0 ]]; then
+                echo "Секрет из $file_path версии $version успешно импортирован в Vault по пути $ROOT_PATH$secret_path"
+            else
+                echo "Ошибка при импорте секрета из $file_path версии $version в Vault по пути $ROOT_PATH$secret_path" >&2
+            fi
+
+            rm "$tmp_file"
         fi
     done
 }
 
 # Указание корневого пути для импорта
 IMPORT_DIR="/scr1/Export/"
-ROOT_PATH="kv2/"
+ROOT_PATH="$kv2/"
 
 # Запуск функции для корневого пути
 import_secrets "$IMPORT_DIR" "$IMPORT_DIR"
+
+
+
 

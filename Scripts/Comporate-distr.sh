@@ -20,33 +20,26 @@ if [ ! -d "$dir2" ]; then
     exit 1
 fi
 
-# Сравниваем содержимое файлов в двух директориях
-for file1 in "$dir1"/*; do
-    match_found=false
-    for file2 in "$dir2"/*; do
-        if cmp -s "$file1" "$file2"; then
-            match_found=true
-            break
-        fi
-    done
+# Функция для создания контрольной суммы для каждого файла
+generate_checksums() {
+    dir=$1
+    find "$dir" -type f -exec md5sum {} \; | sort -k 1
+}
 
-    if ! $match_found; then
-        echo "Файл $(basename "$file1") из $dir1 не имеет соответствия в $dir2"
-    fi
-done
+# Создаем контрольные суммы для файлов в обеих директориях
+checksums1=$(generate_checksums "$dir1")
+checksums2=$(generate_checksums "$dir2")
 
-for file2 in "$dir2"/*; do
-    match_found=false
-    for file1 in "$dir1"/*; do
-        if cmp -s "$file1" "$file2"; then
-            match_found=true
-            break
-        fi
-    done
+# Сравниваем контрольные суммы
+if [ "$checksums1" == "$checksums2" ]; then
+    echo "Все файлы в обеих директориях совпадают по содержимому"
+else
+    echo "Есть различия в содержимом файлов между двумя директориями"
+    echo "Файлы, отличающиеся по содержимому:"
 
-    if ! $match_found; then
-        echo "Файл $(basename "$file2") из $dir2 не имеет соответствия в $dir1"
-    fi
-done
+    # Найдем различия
+    diff <(echo "$checksums1") <(echo "$checksums2") | grep '^<' | awk '{print $2}'
+    diff <(echo "$checksums1") <(echo "$checksums2") | grep '^>' | awk '{print $2}'
+fi
 
 echo "Сравнение завершено"

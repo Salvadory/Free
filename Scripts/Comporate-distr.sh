@@ -9,9 +9,7 @@ compare_files() {
     file1=$1
     file2=$2
 
-    if cmp -s "$file1" "$file2"; then
-        echo "Файлы $file1 и $file2 идентичны"
-    else
+    if ! cmp -s "$file1" "$file2"; then
         echo "Файлы $file1 и $file2 отличаются"
     fi
 }
@@ -33,12 +31,10 @@ compare_directories() {
                 echo "Поддиректория $subdir2/$name отсутствует"
             fi
         elif [ -f "$entry" ]; then
-            # Если это файл, сравниваем со всеми файлами во второй директории
-            for file2 in "$subdir2"/*; do
-                if [ -f "$file2" ]; then
-                    compare_files "$entry" "$file2"
-                fi
-            done
+            # Если это файл, сравниваем с файлом с таким же именем во второй директории
+            if [ -f "$subdir2/$name" ]; then
+                compare_files "$entry" "$subdir2/$name"
+            fi
         fi
     done
 }

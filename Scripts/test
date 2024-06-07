@@ -1,5 +1,49 @@
 #!/bin/bash
 
+# Функция для рекурсивного экспорта секретов с версиями
+export_secrets() {
+    local path="$1"
+    local base_path="$2"
+
+    # Получаем список всех ключей и директорий в текущем пути
+    local keys=$(vault kv list -format=json "$path" | jq -r '.[]')
+
+    for key in $keys; do
+        if [[ "$key" == */ ]]; then
+            # Если это директория, создаем соответствующую директорию и рекурсивно экспортируем её содержимое
+            mkdir -p "$base_path/$key"
+            export_secrets "$path/$key" "$base_path/$key"
+        else
+            # Если это секрет, экспортируем его версии в файлы
+            local secret_path="$path/$key"
+            local output_dir="$base_path/$key"
+            mkdir -p "$output_dir"
+
+            local versions=$(vault kv metadata get -format=json "$secret_path" | jq '.data.versions | keys | sort | join("\n")' -r)
+
+            for version in $versions; do
+                local output_file="$output_dir/version_$version.json"
+                vault kv get -version="$version" -format=json -field=data "$secret_path" > "$output_file"
+                echo "Секрет $secret_path версии $version экспортирован в $output_file"
+            done
+        fi
+    done
+}
+
+# Указание корневого пути в Vault
+ROOT_PATH="kv1/"
+# Указание корневого пути для экспорта
+EXPORT_DIR="/scr1/Export/"
+
+# Создаем корневую директорию для экспорта
+mkdir -p "$EXPORT_DIR"
+
+# Запуск функции для корневого пути
+export_secrets "$ROOT_PATH" "$EXPORT_DIR"
+
+
+#!/bin/bash
+
 # Функция для рекурсивного импорта секретов с версиями
 import_secrets() {
     local path="$1"

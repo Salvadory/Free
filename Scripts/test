@@ -74,15 +74,47 @@ import_secrets() {
     done
 }
 
+#!/bin/bash
+
+# Функция для рекурсивного импорта секретов с версиями
+import_secrets() {
+    local path="$1"
+    local base_path="$2"
+    
+    echo "Обработка директории: $path"
+
+    # Рекурсивно обходим все файлы и директории в текущем пути
+    for entry in "$path"/*; do
+        if [[ -d "$entry" ]]; then
+            echo "Найдена директория: $entry"
+            # Если это директория, рекурсивно импортируем её содержимое
+            import_secrets "$entry" "$base_path"
+        elif [[ -f "$entry" && "$entry" == *version_*.json ]]; then
+            echo "Найден файл версии: $entry"
+            # Если это JSON-файл, добавляем его в список для импорта
+            local relative_path="${entry#$base_path/}"
+            local secret_path="${relative_path%/version_*}"
+            local version="${relative_path#*version_}"
+            version="${version%.json}"
+            local secret_data=$(jq -c . "$entry")
+            
+            # Добавляем запись в массив для последующего импорта
+            secrets_to_import+=("$secret_path $version $secret_data")
+        else
+            echo "Пропущен элемент: $entry"
+        fi
+    done
+}
+
 # Функция для импорта секретов в правильном порядке
 import_secrets_in_order() {
     for secret in "${secrets_to_import[@]}"; do
         IFS=' ' read -r secret_path version secret_data <<< "$secret"
         
         # Проверка наличия версии секрета в Vault
-        if vault kv get -version="$version" "kv2/$secret_path" > /dev/null 2>&1; then
+        if vault kv get -version="$version" "$ROOT_PATH$secret_path" > /dev/null 2>&1; then
             echo "Секрет $secret_path версии $version уже существует, проверка данных..."
-            local existing_data=$(vault kv get -version="$version" -format=json "kv2/$secret_path" | jq -c .data.data)
+            local existing_data=$(vault kv get -version="$version" -format=json "$ROOT_PATH$secret_path" | jq -c .data.data)
             if [[ "$existing_data" == "$secret_data" ]]; then
                 echo "Данные секрета $secret_path версии $version совпадают, пропуск..."
             else
@@ -90,25 +122,25 @@ import_secrets_in_order() {
                 tmp_file=$(mktemp)
                 echo "$secret_data" > "$tmp_file"
                 
-                vault kv put "kv2/$secret_path" @$tmp_file
+                vault kv put "$ROOT_PATH$secret_path" @$tmp_file
                 if [[ $? -eq 0 ]]; then
-                    echo "Секрет из $entry версии $version успешно обновлен в Vault по пути kv2/$secret_path"
+                    echo "Секрет из $entry версии $version успешно обновлен в Vault по пути $ROOT_PATH$secret_path"
                 else
-                    echo "Ошибка при обновлении секрета из $entry версии $version в Vault по пути kv2/$secret_path" >&2
+                    echo "Ошибка при обновлении секрета из $entry версии $version в Vault по пути $ROOT_PATH$secret_path" >&2
                 fi
 
                 rm "$tmp_file"
             fi
         else
-            echo "Импортируем секрет из файла $entry в путь kv2/$secret_path с версией $version"
+            echo "Импортируем секрет из файла $entry в путь $ROOT_PATH$secret_path с версией $version"
             tmp_file=$(mktemp)
             echo "$secret_data" > "$tmp_file"
             
-            vault kv put "kv2/$secret_path" @$tmp_file
+            vault kv put "$ROOT_PATH$secret_path" @$tmp_file
             if [[ $? -eq 0 ]]; then
-                echo "Секрет из $entry версии $version успешно импортирован в Vault по пути kv2/$secret_path"
+                echo "Секрет из $entry версии $version успешно импортирован в Vault по пути $ROOT_PATH$secret_path"
             else
-                echo "Ошибка при импорте секрета из $entry версии $version в Vault по пути kv2/$secret_path" >&2
+                echo "Ошибка при импорте секрета из $entry версии $version в Vault по пути $ROOT_PATH$secret_path" >&2
             fi
 
             rm "$tmp_file"
@@ -128,3 +160,4 @@ import_secrets "$IMPORT_DIR" "$IMPORT_DIR"
 
 # Импорт секретов в правильном порядке
 import_secrets_in_order
+
